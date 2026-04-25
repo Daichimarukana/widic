@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <link rel="manifest" href="manifest.json">
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Wiktionary">
+    <link rel="apple-touch-icon" href="assets/icon-192.png">
+
+    <link rel="icon" type="image/png" href="assets/widic_icon_kadomaru.png">
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js').then(() => {
+                console.log('Service Worker Registered');
+            });
+        }
+    </script>
+    <title>Widic</title>
+    <script src="https://code.jquery.com/jquery-4.0.0.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="search-box">
+        <div class="search-container">
+            <div class="logo-box">
+                <img src="assets/widic_logo.png" alt="Widic">
+                <p>Wiktionary Client</p>
+            </div>
+            <div class="flexbox">
+                <input type="text" id="search-input" class="search-input" placeholder="検索..." autocomplete="off">
+                <button id="search-go" class="search-button"><img src="assets/search-icon.png" alt="Search"></button>
+            </div>
+
+            <ul id="suggest-list"></ul>
+        </div>
+
+        <div class="history-container">
+            <p>検索履歴</p>
+            <ul id="history-list"></ul>
+        </div>
+    </div>
+
+
+    <div class="result" id="result">ここに検索結果が表示されます</div>
+
+    <script>
+        $(document).ready(function () {
+            const apiBase = "https://ja.wiktionary.org/w/api.php";
+
+            let historyStack = [];
+
+            let clickedWord = '';
+
+            function getCachedData(word) {
+                const cache = localStorage.getItem('wiktionary_cache');
+                if (!cache) return null;
+
+                const cacheData = JSON.parse(cache);
+                const item = cacheData[word];
+
+                if (!item) return null;
+
+                const now = Date.now();
+                const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+
+                if (now - item.timestamp > oneWeekInMs) {
+                    console.log("キャッシュの期限が切れています:", word);
+                    delete cacheData[word];
+                    localStorage.setItem('wiktionary_cache', JSON.stringify(cacheData));
+                    return null;
+                }
+
+                return item;
+            }
+
+            function setCachedData(word, data) {
+                let cache = localStorage.getItem('wiktionary_cache');
+                let cacheData = cache ? JSON.parse(cache) : {};
+
+                cacheData[word] = {
+                    title: data.parse.title,
+                    text: data.parse.text["*"],
+                    timestamp: Date.now()
+                };
+
+                const keys = Object.keys(cacheData);
+                if (keys.length > 100) {
+                    delete cacheData[keys[0]];
+                }
+
+                localStorage.setItem('wiktionary_cache', JSON.stringify(cacheData));
+            }
+
+            function updateHistoryUI() {
+                $(".history-container").show();
+                let html = '';
+                for (let i = historyStack.length - 1; i >= 0; i--) {
+                    html += `<li>${historyStack[i]}</li>`;
+                }
+                $('#history-list').html(html);
+            }
+
+            function highlightHistory(word) {
+                $('#history-list li').removeClass("selected").filter(function () {
+                    return $(this).text() === word;
+                }).addClass("selected");
+            }
+
+            $('#search-input').on('input', function () {
+                const query = $(this).val();
+                if (query.length < 1) {
+                    $('#suggest-list').addClass("hide");
+                    $('#suggest-list').removeClass("show");
+
+                    setTimeout(function () {
+                        $('#suggest-list').hide();
+                    }, 300);
+                    return;
+                }
+
+                $.ajax({
+                    url: apiBase,
+                    data: {
+                        action: 'opensearch',
+                        search: query,
+                        limit: 5,
+                        format: 'json',
+                        origin: '*'
+                    },
+                    success: function (data) {
+                        const terms = data[1];
+                        let html = '';
+                        terms.forEach(term => {
+                            html += `<li>${term}</li>`;
+                        });
+                        if (terms.length > 0) {
+                            $('#suggest-list').html(html).show();
+                            $('#suggest-list').removeClass("hide");
+                            $('#suggest-list').addClass("show");
+                        } else {
+                            $('#suggest-list').addClass("hide");
+                            $('#suggest-list').removeClass("show");
+
+                            setTimeout(function () {
+                                $('#suggest-list').hide();
+                            }, 300);
+                        }
+                    }
+                });
+            });
+
+            function searchWord(word, isHistoryClick = false) {
+                $('#search-input').val(word);
+                $('#suggest-list').hide();
+                $('.search-box').addClass("search-box_viewmode");
+                $('.result').addClass("result_viewmode");
+                $('#result').html('<div class="entry-content">読み込み中...</div>');
+
+                const cached = getCachedData(word);
+                if (cached) {
+                    displayResult(cached, word, isHistoryClick);
+                }
+
+                $.ajax({
+                    url: apiBase,
+                    data: {
+                        action: 'parse',
+                        page: word,
+                        prop: 'text',
+                        format: 'json',
+                        origin: '*'
+                    },
+                    success: function (data) {
+                        if (data.parse) {
+                            setCachedData(word, data);
+                            displayResult({
+                                title: data.parse.title,
+                                text: data.parse.text["*"]
+                            }, word, isHistoryClick);
+                        } else {
+                            $('#result').html('<div class="entry-content">見つかりませんでした。</div>');
+                        }
+                    },
+                    error: function () {
+                        $('#result').html('<div class="entry-content">エラーが発生しました。</div>');
+                    }
+                });
+            }
+
+            function displayResult(data, word, isHistoryClick) {
+                if (!isHistoryClick) {
+                    const existingIndex = historyStack.indexOf(word);
+                    if (existingIndex !== -1) historyStack.splice(existingIndex, 1);
+                    historyStack.push(word);
+                    updateHistoryUI(word);
+                    highlightHistory(word);
+                }
+
+                let content = data.text;
+                content = content.replace(/(href|src)="\/(?!\/)/g, '$1="https://ja.wiktionary.org/');
+
+                const finalHtml = `
+        <h1 class="entry-title">${data.title}</h1>
+        <div class="entry-content">${content}</div>
+    `;
+                $('#result').html(finalHtml);
+            }
+
+            // リストクリックで検索
+            $(document).on('click', '#suggest-list li', function () {
+                searchWord($(this).text());
+            });
+
+            // ボタンプッシュで検索
+            $('#search-go').on('click', function () {
+                searchWord($(this).parent().find('#search-input').val());
+            });
+
+            // エンターキーで検索
+            $('#search-input').on('keypress', function (e) {
+                if (e.which == 13) {
+                    searchWord($(this).val());
+                }
+            });
+
+            $(document).on('click', '#history-list li', function () {
+                $(this).siblings().removeClass("selected");
+                $(this).addClass("selected");
+                let clickedWord = $(this).text();
+                searchWord(clickedWord, true);
+            });
+
+            $(document).on('click', '#result a', function (e) {
+                let href = $(this).attr('href');
+                if (!href) return;
+                const internalPattern = /^(\/wiki\/|https:\/\/ja\.wiktionary\.org\/wiki\/)/;
+
+                if (internalPattern.test(href)) {
+                    e.preventDefault();
+                    let nextWord = decodeURIComponent(
+                        href.replace('https://ja.wiktionary.org/wiki/', '').replace('/wiki/', '')
+                    );
+
+                    nextWord = nextWord.split('#')[0];
+
+                    searchWord(nextWord);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else if (href.startsWith('#')) {
+                    // そのまま（ブラウザのデフォルト挙動）
+                } else {
+                    $(this).attr('target', '_blank');
+                    $(this).attr('rel', 'noopener noreferrer');
+                }
+            });
+        });
+    </script>
+
+</body>
+
+</html>
