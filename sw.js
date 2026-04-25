@@ -5,7 +5,7 @@ const urlsToCache = [
     './style.css',
     './assets/widic_logo/icon-192.png',
     './assets/widic_logo/icon-512.png',
-    './assets/manifest.json',
+    './manifest.json',
     './assets/search-icon.png',
     './assets/widic_icon_kadomaru.png',
     './assets/widic_icon.png',
