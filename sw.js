@@ -3,6 +3,13 @@ const urlsToCache = [
     './',
     './index.html',
     './style.css',
+    './assets/widic_logo/icon-192.png',
+    './assets/widic_logo/icon-512.png',
+    './assets/manifest.json',
+    './assets/search-icon.png',
+    './assets/widic_icon_kadomaru.png',
+    './assets/widic_icon.png',
+    './assets/widic_logo.png',
     'https://code.jquery.com/jquery-4.0.0.min.js'
 ];
 
